@@ -430,10 +430,13 @@ local function HandleCommand(message)
                     StopSimpleAura()
                     StartSimpleAura()
                     warn("Simple aura restarted with new range: " .. SimpleAuraRange)
+                    return -- Exit early to avoid toggling
                 end
-                return -- Exit early to avoid toggling
+            else
+                -- Invalid range, just toggle
             end
         end
+        -- Toggle aura on/off
         if SimpleAuraEnabled then
             StopSimpleAura()
             warn("Simple aura disabled")
