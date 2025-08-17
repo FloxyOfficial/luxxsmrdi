@@ -1,0 +1,423 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
+local LP = Players.LocalPlayer
+
+local Dist = 15000
+local DistSq = Dist * Dist
+local DMG_TIMES = 2
+local FTTIMES = 5
+
+local A = {}
+local K = {}
+local TargetList = {} -- Players to attack
+local AuraEnabled = true
+local AutoEquipEnabled = false
+local SimpleAuraEnabled = false
+local SimpleAuraRange = 20
+local CN = nil
+local AutoEquipConnection = nil
+local SimpleAuraConnection = nil
+
+-- Find ALL players by partial name (MODIFIED)
+local function FindPlayers(partialName)
+    local lowerName = partialName:lower()
+    local foundPlayers = {}
+    
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LP then continue end
+        local pName = p.Name:lower()
+        local pDisplay = p.DisplayName:lower()
+        if pName:find(lowerName) or pDisplay:find(lowerName) then
+            table.insert(foundPlayers, p)
+        end
+    end
+    return foundPlayers
+end
+
+-- Add player to target list
+local function AddTarget(player)
+    TargetList[player.UserId] = true
+end
+
+-- Remove player from target list
+local function RemoveTarget(player)
+    TargetList[player.UserId] = nil
+end
+
+-- Add multiple players to target list (NEW)
+local function AddMultipleTargets(players)
+    local count = 0
+    for _, player in ipairs(players) do
+        if not TargetList[player.UserId] then
+            AddTarget(player)
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- Remove multiple players from target list (NEW)
+local function RemoveMultipleTargets(players)
+    local count = 0
+    for _, player in ipairs(players) do
+        if TargetList[player.UserId] then
+            RemoveTarget(player)
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function CRB(x)
+    if x:IsA("Tool") and x:FindFirstChild("Handle") then
+        local h = x.Handle
+        if not h:FindFirstChild("BoxReachPart") then
+            local p = Instance.new("Part")
+            p.Name = "BoxReachPart"
+            p.Size = Vector3.new(Dist, Dist, Dist)
+            p.Transparency = 1
+            p.CanCollide = false
+            p.Massless = true
+            p.Parent = h
+            local w = Instance.new("WeldConstraint")
+            w.Part0 = h
+            w.Part1 = p
+            w.Parent = p
+        end
+    end
+end
+
+local function FT(a, b)
+    for i = 1, FTTIMES do
+        firetouchinterest(a, b, 0)
+        firetouchinterest(a, b, 1)
+    end
+end
+
+local function KL(p, t)
+    if K[p] then return end
+    K[p] = true
+    
+    task.spawn(function()
+        while K[p] and AuraEnabled do
+            local lc = LP.Character
+            local tc = p.Character
+            if not (lc and tc) then break end
+            local tw = lc:FindFirstChildWhichIsA("Tool")
+            local th = tc:FindFirstChildOfClass("Humanoid")
+            if not (tw and tw.Parent == lc and t.Parent and th and th.Health > 0) then break end
+            
+            -- Only attack if in target list
+            if not TargetList[p.UserId] then break end
+            
+            for _, v in ipairs(tc:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    firetouchinterest(t, v, 0)
+                    firetouchinterest(t, v, 1)
+                end
+            end
+            task.wait()
+        end
+        K[p] = nil
+    end)
+end
+
+local function PC(c)
+    for _, v in ipairs(c:GetDescendants()) do
+        CRB(v)
+    end
+    c.ChildAdded:Connect(CRB)
+end
+
+local function MH(toolPart, plr)
+    -- Only attack if in target list
+    if not TargetList[plr.UserId] then return end
+    
+    local c = plr.Character
+    if not c then return end
+    local h = c:FindFirstChildOfClass("Humanoid")
+    local r = c:FindFirstChild("HumanoidRootPart")
+    if not (h and r and h.Health > 0) then return end
+    
+    pcall(function() 
+        toolPart.Parent:Activate() 
+    end)
+    
+    for i = 1, DMG_TIMES do
+        for _, v in ipairs(c:GetDescendants()) do
+            if v:IsA("BasePart") then
+                FT(toolPart, v)
+            end
+        end
+    end
+    
+    KL(plr, toolPart)
+end
+
+local function HB()
+    if not AuraEnabled then return end
+    
+    local c = LP.Character
+    if not c then return end
+    local hrp = c:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local pos = hrp.Position
+    
+    for _, t in ipairs(c:GetDescendants()) do
+        if t:IsA("Tool") and t.Parent == c then
+            local b = t:FindFirstChild("BoxReachPart") or t:FindFirstChild("Handle")
+            if b then
+                for _, p in ipairs(A) do
+                    if p ~= LP and p.Character and TargetList[p.UserId] then
+                        local rp = p.Character:FindFirstChild("HumanoidRootPart")
+                        local hm = p.Character:FindFirstChildOfClass("Humanoid")
+                        if rp and hm and hm.Health > 0 then
+                            local d = rp.Position - pos
+                            if d:Dot(d) <= DistSq then
+                                MH(b, p)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function StartAutoEquip()
+    if AutoEquipConnection then AutoEquipConnection:Disconnect() end
+    AutoEquipConnection = RunService.Stepped:Connect(function()
+        pcall(function()
+            for _, tool in ipairs(LP.Backpack:GetChildren()) do
+                if tool.Name == "Punch" or tool.Name == "Ground Slam" or tool.Name == "Stomp" then
+                    tool:Destroy()
+                elseif tool:IsA("Tool") then
+                    tool.Parent = LP.Character
+                end
+            end
+            local tool = LP.Character:FindFirstChildOfClass("Tool")
+            if tool then
+                tool:Activate()
+            end
+        end)
+    end)
+    AutoEquipEnabled = true
+end
+
+local function StopAutoEquip()
+    if AutoEquipConnection then
+        AutoEquipConnection:Disconnect()
+        AutoEquipConnection = nil
+    end
+    AutoEquipEnabled = false
+end
+
+-- Simple Aura Functions
+local function StartSimpleAura()
+    if SimpleAuraConnection then SimpleAuraConnection:Disconnect() end
+    
+    local RANGE_SQ = SimpleAuraRange * SimpleAuraRange
+    
+    local function onRenderStep()
+        local character = LP.Character
+        if not character then return end
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local tool = character:FindFirstChildOfClass("Tool")
+        if not (tool and tool:FindFirstChild("Handle")) then return end
+        local handle = tool.Handle
+        local lpPos = hrp.Position
+        local activated = false
+        
+        for _, otherPlayer in ipairs(Players:GetPlayers()) do
+            if otherPlayer ~= LP and otherPlayer.Character then
+                local targetChar = otherPlayer.Character
+                local targetHrp = targetChar:FindFirstChild("HumanoidRootPart")
+                local humanoid = targetChar:FindFirstChildWhichIsA("Humanoid")
+                if targetHrp and humanoid and humanoid.Health > 0 then
+                    local delta = targetHrp.Position - lpPos
+                    if delta:Dot(delta) <= RANGE_SQ then
+                        if not activated then
+                            pcall(function()
+                                tool:Activate()
+                            end)
+                            activated = true
+                        end
+                        for _, part in ipairs(targetChar:GetDescendants()) do
+                            if part:IsA("BasePart") then
+                                pcall(function()
+                                    firetouchinterest(handle, part, 0)
+                                    firetouchinterest(handle, part, 1)
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    SimpleAuraConnection = RunService.RenderStepped:Connect(onRenderStep)
+    SimpleAuraEnabled = true
+end
+
+local function StopSimpleAura()
+    if SimpleAuraConnection then
+        SimpleAuraConnection:Disconnect()
+        SimpleAuraConnection = nil
+    end
+    SimpleAuraEnabled = false
+end
+
+local function SK()
+    if CN then CN:Disconnect() end
+    CN = RunService.Heartbeat:Connect(HB)
+end
+
+-- Command processing flag to prevent double execution
+local commandProcessed = false
+
+-- Handle chat commands (MODIFIED)
+local function HandleCommand(message)
+    if commandProcessed then 
+        commandProcessed = false
+        return 
+    end
+    commandProcessed = true
+    
+    local args = message:split(" ")
+    local command = args[1]
+    
+    if command == "!lp" and #args >= 2 then
+        local playerName = table.concat(args, " ", 2)
+        local targets = FindPlayers(playerName)
+        if #targets > 0 then
+            local addedCount = AddMultipleTargets(targets)
+            local playerNames = {}
+            for _, player in ipairs(targets) do
+                table.insert(playerNames, player.Name)
+            end
+            warn("Added " .. addedCount .. " players to target list: " .. table.concat(playerNames, ", "))
+        else
+            warn("No players found matching: " .. playerName)
+        end
+    elseif command == "!unlp" and #args >= 2 then
+        local playerName = table.concat(args, " ", 2)
+        local targets = FindPlayers(playerName)
+        if #targets > 0 then
+            local removedCount = RemoveMultipleTargets(targets)
+            local playerNames = {}
+            for _, player in ipairs(targets) do
+                table.insert(playerNames, player.Name)
+            end
+            warn("Removed " .. removedCount .. " players from target list: " .. table.concat(playerNames, ", "))
+        else
+            warn("No players found matching: " .. playerName)
+        end
+    elseif command == "!listtargets" then
+        local targetNames = {}
+        for userId, _ in pairs(TargetList) do
+            local player = Players:GetPlayerByUserId(userId)
+            if player then
+                table.insert(targetNames, player.Name)
+            end
+        end
+        if #targetNames > 0 then
+            warn("Current targets: " .. table.concat(targetNames, ", "))
+        else
+            warn("No current targets")
+        end
+    elseif command == "!clearall" then
+        table.clear(TargetList)
+        warn("Cleared all targets")
+    elseif command == "autoequiptool!" then
+        if AutoEquipEnabled then
+            StopAutoEquip()
+            warn("Auto equip disabled")
+        else
+            StartAutoEquip()
+            warn("Auto equip enabled")
+        end
+    elseif command == "aura!" then
+        if #args >= 2 then
+            local range = tonumber(args[2])
+            if range and range > 0 then
+                SimpleAuraRange = range
+                warn("Simple aura range set to: " .. range)
+            end
+        end
+        if SimpleAuraEnabled then
+            StopSimpleAura()
+            warn("Simple aura disabled")
+        else
+            StartSimpleAura()
+            warn("Simple aura enabled with range: " .. SimpleAuraRange)
+        end
+    end
+    
+    task.wait(0.1)
+    commandProcessed = false
+end
+
+-- Connect to new TextChatService
+pcall(function()
+    local textChannels = TextChatService:WaitForChild("TextChannels")
+    local rbxGeneral = textChannels:WaitForChild("RBXGeneral")
+    
+    rbxGeneral.MessageReceived:Connect(function(message)
+        if message.TextSource and message.TextSource.UserId == LP.UserId then
+            HandleCommand(message.Text)
+        end
+    end)
+end)
+
+-- Fallback for old chat system
+pcall(function()
+    LP.Chatted:Connect(HandleCommand)
+end)
+
+LP.CharacterAdded:Connect(function(c)
+    c:WaitForChild("HumanoidRootPart", 10)
+    PC(c)
+    SK()
+end)
+
+Players.PlayerAdded:Connect(function(p)
+    table.insert(A, p)
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    for i, v in ipairs(A) do
+        if v == p then
+            table.remove(A, i)
+            break
+        end
+    end
+    K[p] = nil
+    TargetList[p.UserId] = nil
+end)
+
+local function UP()
+    table.clear(A)
+    for _, p in ipairs(Players:GetPlayers()) do
+        table.insert(A, p)
+    end
+end
+
+-- Auto start everything
+if LP.Character then
+    PC(LP.Character)
+    SK()
+end
+
+UP()
+
+warn("Multi-target aura script loaded!")
+warn("Commands:")
+warn("!lp <name> - Target all players containing <name>")
+warn("!unlp <name> - Untarget all players containing <name>")
+warn("!listtargets - Show current targets")
+warn("!clearall - Clear all targets")
+warn("autoequiptool! - Toggle auto equip")
+warn("aura! <range> - Toggle simple aura with optional range")
