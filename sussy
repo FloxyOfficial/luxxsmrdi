@@ -11,6 +11,7 @@ local FTTIMES = 5
 local A = {}
 local K = {}
 local TargetList = {} -- Players to attack
+local WhiteList = {} -- Players to never attack (NEW)
 local AuraEnabled = true
 local AutoEquipEnabled = false
 local SimpleAuraEnabled = false
@@ -45,6 +46,16 @@ local function RemoveTarget(player)
     TargetList[player.UserId] = nil
 end
 
+-- Add player to whitelist (NEW)
+local function AddToWhitelist(player)
+    WhiteList[player.UserId] = true
+end
+
+-- Remove player from whitelist (NEW)
+local function RemoveFromWhitelist(player)
+    WhiteList[player.UserId] = nil
+end
+
 -- Add multiple players to target list (NEW)
 local function AddMultipleTargets(players)
     local count = 0
@@ -63,6 +74,30 @@ local function RemoveMultipleTargets(players)
     for _, player in ipairs(players) do
         if TargetList[player.UserId] then
             RemoveTarget(player)
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- Add multiple players to whitelist (NEW)
+local function AddMultipleToWhitelist(players)
+    local count = 0
+    for _, player in ipairs(players) do
+        if not WhiteList[player.UserId] then
+            AddToWhitelist(player)
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- Remove multiple players from whitelist (NEW)
+local function RemoveMultipleFromWhitelist(players)
+    local count = 0
+    for _, player in ipairs(players) do
+        if WhiteList[player.UserId] then
+            RemoveFromWhitelist(player)
             count = count + 1
         end
     end
@@ -213,7 +248,7 @@ local function StopAutoEquip()
     AutoEquipEnabled = false
 end
 
--- Simple Aura Functions
+-- Simple Aura Functions (MODIFIED to respect whitelist)
 local function StartSimpleAura()
     if SimpleAuraConnection then SimpleAuraConnection:Disconnect() end
     
@@ -232,6 +267,9 @@ local function StartSimpleAura()
         
         for _, otherPlayer in ipairs(Players:GetPlayers()) do
             if otherPlayer ~= LP and otherPlayer.Character then
+                -- Skip if player is whitelisted (NEW CHECK)
+                if WhiteList[otherPlayer.UserId] then continue end
+                
                 local targetChar = otherPlayer.Character
                 local targetHrp = targetChar:FindFirstChild("HumanoidRootPart")
                 local humanoid = targetChar:FindFirstChildWhichIsA("Humanoid")
@@ -278,7 +316,7 @@ end
 -- Command processing flag to prevent double execution
 local commandProcessed = false
 
--- Handle chat commands (MODIFIED)
+-- Handle chat commands (MODIFIED with whitelist commands)
 local function HandleCommand(message)
     if commandProcessed then 
         commandProcessed = false
@@ -315,6 +353,32 @@ local function HandleCommand(message)
         else
             warn("No players found matching: " .. playerName)
         end
+    elseif command == "whitelist!" and #args >= 2 then -- NEW COMMAND
+        local playerName = table.concat(args, " ", 2)
+        local targets = FindPlayers(playerName)
+        if #targets > 0 then
+            local addedCount = AddMultipleToWhitelist(targets)
+            local playerNames = {}
+            for _, player in ipairs(targets) do
+                table.insert(playerNames, player.Name)
+            end
+            warn("Added " .. addedCount .. " players to whitelist: " .. table.concat(playerNames, ", "))
+        else
+            warn("No players found matching: " .. playerName)
+        end
+    elseif command == "unwhitelist!" and #args >= 2 then -- NEW COMMAND
+        local playerName = table.concat(args, " ", 2)
+        local targets = FindPlayers(playerName)
+        if #targets > 0 then
+            local removedCount = RemoveMultipleFromWhitelist(targets)
+            local playerNames = {}
+            for _, player in ipairs(targets) do
+                table.insert(playerNames, player.Name)
+            end
+            warn("Removed " .. removedCount .. " players from whitelist: " .. table.concat(playerNames, ", "))
+        else
+            warn("No players found matching: " .. playerName)
+        end
     elseif command == "!listtargets" then
         local targetNames = {}
         for userId, _ in pairs(TargetList) do
@@ -328,9 +392,25 @@ local function HandleCommand(message)
         else
             warn("No current targets")
         end
+    elseif command == "!listwhitelist" then -- NEW COMMAND
+        local whitelistNames = {}
+        for userId, _ in pairs(WhiteList) do
+            local player = Players:GetPlayerByUserId(userId)
+            if player then
+                table.insert(whitelistNames, player.Name)
+            end
+        end
+        if #whitelistNames > 0 then
+            warn("Current whitelist: " .. table.concat(whitelistNames, ", "))
+        else
+            warn("No players whitelisted")
+        end
     elseif command == "!clearall" then
         table.clear(TargetList)
         warn("Cleared all targets")
+    elseif command == "!clearwhitelist" then -- NEW COMMAND
+        table.clear(WhiteList)
+        warn("Cleared all whitelisted players")
     elseif command == "autoequiptool!" then
         if AutoEquipEnabled then
             StopAutoEquip()
@@ -345,6 +425,13 @@ local function HandleCommand(message)
             if range and range > 0 then
                 SimpleAuraRange = range
                 warn("Simple aura range set to: " .. range)
+                -- If aura is already enabled, restart it with new range
+                if SimpleAuraEnabled then
+                    StopSimpleAura()
+                    StartSimpleAura()
+                    warn("Simple aura restarted with new range: " .. SimpleAuraRange)
+                end
+                return -- Exit early to avoid toggling
             end
         end
         if SimpleAuraEnabled then
@@ -396,6 +483,7 @@ Players.PlayerRemoving:Connect(function(p)
     end
     K[p] = nil
     TargetList[p.UserId] = nil
+    WhiteList[p.UserId] = nil -- Clean up whitelist too (NEW)
 end)
 
 local function UP()
@@ -413,11 +501,15 @@ end
 
 UP()
 
-warn("Multi-target aura script loaded!")
+warn("Multi-target aura script with whitelist loaded!")
 warn("Commands:")
 warn("!lp <name> - Target all players containing <name>")
 warn("!unlp <name> - Untarget all players containing <name>")
 warn("!listtargets - Show current targets")
 warn("!clearall - Clear all targets")
+warn("whitelist! <name> - Add players containing <name> to whitelist")
+warn("unwhitelist! <name> - Remove players containing <name> from whitelist")
+warn("!listwhitelist - Show current whitelisted players")
+warn("!clearwhitelist - Clear all whitelisted players")
 warn("autoequiptool! - Toggle auto equip")
 warn("aura! <range> - Toggle simple aura with optional range")
